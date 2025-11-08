@@ -1,0 +1,200 @@
+/* General Reset and Base Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f7f6;
+    color: #333;
+    display: flex; 
+    min-height: 100vh;
+}
+
+/* ============================================== */
+/* Dashboard Structure */
+/* ============================================== */
+.dashboard {
+    display: flex;
+    width: 100%;
+}
+
+.dashboard.hidden {
+    display: none;
+}
+
+/* Sidebar Styling (The Slideable Menu) */
+.sidebar {
+    width: 250px; 
+    background-color: #2c3e50; 
+    color: white;
+    padding-top: 20px;
+    position: fixed; 
+    height: 100%;
+    transition: width 0.3s ease; 
+    z-index: 100;
+    overflow-x: hidden;
+}
+
+.sidebar.collapsed {
+    width: 60px; 
+}
+
+.sidebar header {
+    padding: 0 15px 20px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar.collapsed h2 {
+    display: none;
+}
+
+.sidebar nav {
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar nav a {
+    color: white;
+    text-decoration: none;
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap; 
+}
+
+.sidebar nav a:hover {
+    background-color: #34495e; 
+}
+
+/* Toggle Button */
+.toggle-btn {
+    background: none;
+    border: 1px solid white;
+    color: white;
+    cursor: pointer;
+    padding: 5px 10px;
+    font-size: 18px;
+    border-radius: 4px;
+}
+
+/* Content Area */
+.content {
+    margin-left: 250px; 
+    padding: 20px;
+    width: 100%;
+    transition: margin-left 0.3s ease;
+    /* FIX FOR SIDEBAR SCROLLING ISSUE: TEMPORARILY increase height */
+    min-height: 1200px; 
+}
+
+.sidebar.collapsed + .content {
+    margin-left: 60px; 
+}
+
+.portal-header {
+    border-bottom: 2px solid #ccc;
+    padding-bottom: 10px;
+    margin-bottom: 30px;
+    color: #2980b9; 
+}
+
+/* ============================================== */
+/* Component Styling */
+/* ============================================== */
+
+.dashboard-section {
+    background-color: white;
+    padding: 20px;
+    margin-bottom: 25px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Forms */
+.admission-form, .attendance-form {
+    display: grid;
+    gap: 15px;
+    grid-template-columns: 1fr;
+    max-width: 600px;
+}
+
+label {
+    font-weight: bold;
+    margin-top: 5px;
+}
+
+input[type="text"], input[type="file"], textarea, select, input[type="date"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+button[type="submit"], .pay-btn {
+    background-color: #27ae60; 
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
+button[type="submit"]:hover, .pay-btn:hover {
+    background-color: #2ecc71;
+}
+
+/* Tables (Applications Review) */
+.application-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.application-table th, .application-table td {
+    padding: 12px;
+    border: 1px solid #ecf0f1;
+    text-align: left;
+}
+
+.application-table th {
+    background-color: #3498db; 
+    color: white;
+}
+
+/* Action Buttons */
+.action-btn {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 5px;
+}
+
+.approve {
+    background-color: #2ecc71; 
+    color: white;
+}
+.reject {
+    background-color: #e74c3c; 
+    color: white;
+}
+
+/* Chart Placeholder */
+.chart-placeholder {
+    height: 200px;
+    background-color: #ecf0f1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 10px;
+    border-radius: 4px;
+    border: 1px dashed #bdc3c7;
+    flex-direction: column;
+}

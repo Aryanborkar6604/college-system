@@ -1,0 +1,2094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Role-Based Dashboard System (Professional Edition)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <style>
+        :root {
+            --primary-blue: #3b82f6; /* Tailwind blue-500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s ease;
+        }
+        .sidebar {
+            width: 280px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                position: fixed;
+                z-index: 50;
+                height: 100%;
+                box-shadow: none;
+            }
+            .sidebar.active {
+                transform: translateX(0);
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            }
+        }
+        /* Custom scrollbar for better look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <div id="app-container" class="flex min-h-screen">
+        </div>
+
+    <script type="module">
+        
+        // --- HARDCODED INITIAL STATE (In-Memory Demo) ---
+        const DEMO_MASTER_STUDENT_DATA = {
+            attendanceDetails: [
+                { name: 'Financial Modeling', classes: 30, attended: 27, total: 30, percentage: 90 },
+                { name: 'Accounting I', classes: 20, attended: 16, total: 20, percentage: 80 },
+                { name: 'Investments', classes: 30, attended: 29, total: 30, percentage: 97 },
+            ],
+            finance: {
+                totalFee: 15000,
+                paidFee: 0,
+                dueAmount: 15000,
+                lastPaymentDate: 'N/A',
+                dueDeadline: '2025-01-15',
+                transactions: []
+            },
+            marks: {
+                Financial_Modeling: 0,
+                Accounting_I: 0,
+                Investments: 0
+            }
+        };
+
+        const INITIAL_NOTICES = [
+            { id: 'N001', title: 'Welcome Back!', content: 'Semester classes will begin on Monday at 9 AM. Check your schedules.', date: 'Oct 1, 2025', createdAt: new Date(Date.now() - 86400000), postedBy: 'Administration' },
+            { id: 'N002', title: 'Fee Deadline Approaching', content: 'The deadline for the second installment of fees is Jan 15th.', date: 'Oct 5, 2025', createdAt: new Date(Date.now() - 5 * 86400000), postedBy: 'Finance Dept.' },
+        ];
+        
+        const INITIAL_DEMO_STUDENTS = [
+            { uid: 'alice@demo.edu', name: 'Alice Smith', email: 'alice@demo.edu', totalFee: 15000, paidFee: 10000, attendedClasses: 72, totalClasses: 80 },
+            { uid: 'bob@demo.edu', name: 'Bob Johnson', email: 'bob@demo.edu', totalFee: 15000, paidFee: 15000, attendedClasses: 60, totalClasses: 80 },
+            { uid: 'charlie@demo.edu', name: 'Charlie Brown', email: 'charlie@demo.edu', totalFee: 15000, paidFee: 5000, attendedClasses: 40, totalClasses: 80 },
+        ];
+
+        // --- GLOBAL CONSTANT FOR CURRENCY ---
+        const CURRENCY_SYMBOL = '₹';
+
+
+        // --- LOCAL STORAGE PERSISTENCE UTILITIES ---
+        function loadState() {
+            try {
+                const serializedState = localStorage.getItem('dashboardStateV2');
+                if (serializedState === null) {
+                    return {
+                        accounts: [], // No registered users yet
+                        appData: {
+                            notices: INITIAL_NOTICES,
+                            applications: [],
+                            studentRecords: {}, // Store all student records here, keyed by email
+                            demoStudents: INITIAL_DEMO_STUDENTS,
+                            studentMarks: {},
+                        },
+                    };
+                }
+                const parsedState = JSON.parse(serializedState, (key, value) => {
+                    // Revive date strings back into Date objects
+                    if (key === 'submissionDate' || key === 'createdAt') {
+                        return new Date(value);
+                    }
+                    return value;
+                });
+                return parsedState;
+            } catch (e) {
+                console.error("Could not load state from localStorage. Using initial state.", e);
+                return { accounts: [], appData: { notices: INITIAL_NOTICES, applications: [], studentRecords: {}, demoStudents: INITIAL_DEMO_STUDENTS, studentMarks: {} } };
+            }
+        }
+
+        function saveState() {
+            try {
+                const serializedState = JSON.stringify({
+                    accounts: state.accounts,
+                    appData: state.appData
+                });
+                localStorage.setItem('dashboardStateV2', serializedState);
+            } catch (e) {
+                console.error("Could not save state to localStorage", e);
+            }
+        }
+
+        // --- GLOBAL STATE ---
+        let state = {
+            isAuthenticated: false,
+            user: null, // { email, name, role, photoUrl }
+            view: 'login',
+
+            // Load persisted state or use initial data
+            ...loadState(), 
+            
+            // This is the active data for the currently logged-in user
+            currentUserData: null, 
+            
+            // Fixed data
+            schedule: [
+                { time: '09:00 - 10:00', day: 'Mon', teacher: 'Dr. A. Sharma', course: 'Accounting I', room: 'B101' },
+                { time: '10:00 - 11:00', day: 'Mon', teacher: 'Prof. J. Smith', course: 'Financial Modeling', room: 'L205' },
+                { time: '11:00 - 12:00', day: 'Tue', teacher: 'Dr. A. Sharma', course: 'Office Hours', room: 'B101' },
+                { time: '09:00 - 10:00', day: 'Wed', teacher: 'Prof. J. Smith', course: 'Investments', room: 'L205' },
+            ],
+            // UPDATED to use a stable placeholder service for demo visibility
+            examTimetable: [
+                { date: '2025-12-10', time: '10:00 AM', subject: 'Financial Modeling', room: 'Auditorium', questionUrl: 'https://placehold.co/800x600/b91c1c/ffffff?text=Financial+Modeling+Question+Paper' },
+                { date: '2025-12-12', time: '02:00 PM', subject: 'Accounting I', room: 'Room C302', questionUrl: null },
+                { date: '2025-12-15', time: '10:00 AM', subject: 'Investments', room: 'Room L205', questionUrl: 'https://placehold.co/800x600/b91c1c/ffffff?text=Investments+Question+Paper' },
+            ]
+        };
+
+        const $ = selector => document.querySelector(selector);
+        const $$ = selector => document.querySelectorAll(selector);
+        const container = $('#app-container');
+        
+
+        // --- AUTH/LOGIN HANDLERS ---
+        
+        function renderLogin() {
+            container.innerHTML = `
+                <div class="flex items-center justify-center w-full">
+                    <div class="w-full max-w-md p-8 m-4 bg-white shadow-xl rounded-xl border border-gray-100">
+                        <div class="text-center mb-8">
+                            <i class="fas fa-university text-4xl text-blue-600 mb-2"></i>
+                            <h2 class="text-3xl font-extrabold text-gray-900">Sign In / Register</h2>
+                            <p class="text-sm text-gray-500">Enter your credentials below.</p>
+                        </div>
+                        <form id="login-form" class="space-y-6">
+                            <div>
+                                <label for="email" class="block text-sm font-medium text-gray-700">Email/Student ID</label>
+                                <input id="email" name="email" type="email" required class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label for="password" class="block text-sm font-medium text-gray-700">Password (Simulated)</label>
+                                <input id="password" name="password" type="password" required class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div id="new-user-fields" class="space-y-4 hidden">
+                                <label for="name" class="block text-sm font-medium text-gray-700">Your Full Name</label>
+                                <input id="name" name="name" type="text" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., Jane Doe">
+                                <label for="role" class="block text-sm font-medium text-gray-700">Select Role</label>
+                                <select id="role" name="role" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="student">Student</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <div id="login-error" class="text-red-500 text-sm hidden"></div>
+                            <div>
+                                <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition duration-150 ease-in-out">
+                                    Sign In / Register
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            
+            const emailInput = $('#email');
+            const newFields = $('#new-user-fields');
+            
+            // Check if user exists on email input and show/hide register fields
+            emailInput.addEventListener('input', () => {
+                const exists = state.accounts.some(acc => acc.email === emailInput.value.trim());
+                if (exists) {
+                    newFields.classList.add('hidden');
+                    $('#name').removeAttribute('required');
+                } else {
+                    newFields.classList.remove('hidden');
+                    $('#name').setAttribute('required', 'required');
+                }
+            });
+            
+            // Attach event listener for form submission
+            $('#login-form').addEventListener('submit', handleLogin);
+        }
+
+        function handleLogin(event) {
+            // CRITICAL FIX: Ensure default form submission is prevented
+            event.preventDefault(); 
+            
+            const email = $('#email').value.trim();
+            const password = $('#password').value;
+            const name = $('#name').value.trim();
+            const role = $('#role')?.value;
+            const errorElement = $('#login-error');
+
+            const existingAccount = state.accounts.find(acc => acc.email === email);
+            let userRole;
+            let userName;
+
+            if (existingAccount) {
+                // --- SIGN IN ---
+                if (existingAccount.password !== password) {
+                    errorElement.textContent = "Invalid password.";
+                    errorElement.classList.remove('hidden');
+                    return;
+                }
+                userRole = existingAccount.role;
+                userName = existingAccount.name;
+            } else {
+                // --- REGISTER ---
+                if (!$('#new-user-fields').classList.contains('hidden') && (!name || !role)) {
+                    errorElement.textContent = "Please provide your full name and select a role to register.";
+                    errorElement.classList.remove('hidden');
+                    return;
+                }
+                
+                userRole = role;
+                userName = name;
+
+                const newAccount = { email, password, name, role: userRole, uid: email }; // Use email as UID for persistence key
+                state.accounts.push(newAccount);
+                
+                // Initialize the user's specific student record data
+                if (userRole === 'student') {
+                    // FIX: Ensure studentRecords is initialized with full structure
+                    state.appData.studentRecords[email] = {
+                        application: null,
+                        marks: JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.marks)), 
+                        finance: JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.finance)),
+                        attendedClasses: 0,
+                        totalClasses: 0,
+                        attendanceDetails: JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.attendanceDetails)),
+                    };
+                }
+            }
+            errorElement.classList.add('hidden');
+            
+            // --- FINAL LOGIN STATE SETUP ---
+            state.isAuthenticated = true;
+            state.user = {
+                uid: email, // Email used as UID for persistence key
+                name: userName,
+                role: userRole,
+                photoUrl: 'https://placehold.co/128x128/3b82f6/ffffff?text=' + userName.split(' ').map(n => n[0]).join('')
+            };
+            
+            // Set the current user's data record reference
+            state.currentUserData = state.appData.studentRecords[email] || null; 
+
+            state.view = userRole === 'student' ? 'student-home' : 'admin';
+            saveState();
+            renderApp();
+        }
+
+        function handleLogout() {
+            state.isAuthenticated = false;
+            state.user = null;
+            state.currentUserData = null;
+            state.view = 'login';
+            renderApp();
+        }
+
+
+        // --- IN-MEMORY WRITE OPERATIONS ---
+
+        function handleProfilePhotoUpdate() {
+            // Simulated URL update
+            const newUrl = prompt("Enter the new URL for your profile picture:", "https://placehold.co/128x128/9ca3af/ffffff?text=NP");
+            if (newUrl) {
+                state.user.photoUrl = newUrl;
+                // Update profile photo in the accounts list
+                const account = state.accounts.find(a => a.email === state.user.email);
+                if (account) account.photoUrl = newUrl;
+                
+                saveState();
+                renderApp();
+            }
+        }
+        
+        function handlePaymentSubmit(event) {
+            event.preventDefault();
+            const paymentAmount = parseInt($('#paymentAmount').value, 10);
+            const finance = state.currentUserData.finance;
+            const messageElement = $('#payment-message');
+
+            if (isNaN(paymentAmount) || paymentAmount <= 0 || paymentAmount > finance.dueAmount) {
+                 messageElement.textContent = 'Please enter a valid amount within the due limit.';
+                 messageElement.classList.remove('hidden', 'text-green-600');
+                 messageElement.classList.add('text-red-500');
+                 return;
+            }
+
+            const newPaidFee = finance.paidFee + paymentAmount;
+            const newDueAmount = finance.dueAmount - paymentAmount;
+            
+            const newTransaction = {
+                id: generateId('TRX'),
+                date: formatDate(new Date()),
+                description: 'Fee Payment',
+                amount: paymentAmount,
+                status: 'Paid'
+            };
+            
+            // Update state in currentUserData
+            finance.paidFee = newPaidFee;
+            finance.dueAmount = newDueAmount;
+            finance.transactions.push(newTransaction);
+            
+            messageElement.textContent = `Payment of ${CURRENCY_SYMBOL}${paymentAmount.toLocaleString()} successful!`;
+            messageElement.classList.remove('hidden', 'text-red-500');
+            messageElement.classList.add('text-green-600');
+            
+            saveState(); 
+            renderApp();
+        }
+
+        function handleApplicationSubmit(event) {
+            event.preventDefault();
+            const fullName = $('#fullName').value;
+            const email = $('#email').value;
+            const course = $('#course').value;
+            const statement = $('#personalStatement').value;
+            const message = $('#form-message');
+
+            if (!course) {
+                message.textContent = 'Please select a course preference.';
+                message.classList.remove('hidden');
+                message.classList.add('text-red-500');
+                return;
+            }
+
+            const newApplication = {
+                id: generateId('APP'), 
+                studentId: state.user.email, // Key application by email for persistence
+                name: fullName,
+                email: email,
+                course: course,
+                statement: statement,
+                status: 'Pending', 
+                submissionDate: new Date() 
+            };
+            
+            // Remove any previous application by this student
+            state.appData.applications = state.appData.applications.filter(app => app.studentId !== state.user.email);
+            state.appData.applications.push(newApplication);
+
+            message.textContent = `Application submitted successfully! Redirecting...`;
+            message.classList.remove('hidden', 'text-red-500');
+            message.classList.add('text-green-600', 'font-semibold');
+
+            saveState(); 
+
+            setTimeout(() => changeView('student-home'), 1500);
+            renderApp();
+        }
+        
+        function handleUpdateAttendance(event) {
+            event.preventDefault();
+            
+            // Get studentId from the hidden input field inside the form
+            const studentId = $('#attendance-update-form').elements['studentId'].value; 
+            const attended = parseInt($('#attendance-update-form').elements['attendedClasses'].value, 10);
+            const total = parseInt($('#attendance-update-form').elements['totalClasses'].value, 10);
+            const messageElement = $(`#attendance-message-${studentId}`);
+            
+            const studentRecord = state.appData.studentRecords[studentId];
+            const studentName = state.accounts.find(a => a.email === studentId)?.name || studentId;
+
+
+            if (!studentRecord) {
+                messageElement.textContent = `Error: Student record for ${studentId} not found or not registered.`;
+                messageElement.classList.remove('hidden', 'text-green-600');
+                messageElement.classList.add('text-red-500');
+                return;
+            }
+
+            if (attended > total) {
+                messageElement.textContent = 'Attended classes cannot exceed total classes.';
+                messageElement.classList.remove('hidden', 'text-green-600');
+                messageElement.classList.add('text-red-500');
+                return;
+            }
+
+            const newOverallPercent = total > 0 ? Math.round((attended / total) * 100) : 0;
+            const ratio = total > 0 ? attended / total : 0;
+            
+            // 1. Update primary attendance fields
+            studentRecord.attendedClasses = attended;
+            studentRecord.totalClasses = total;
+
+            // 2. Update subject details based on new ratio
+            const updatedSubjects = studentRecord.attendanceDetails.map(sub => {
+                // Ensure default attendanceDetails exists if it was initialized empty
+                if (!sub.total) sub.total = 30; // Default total classes for subjects
+
+                const newAttended = Math.round(sub.total * ratio);
+                const newPercentage = parseFloat(((newAttended / sub.total) * 100).toFixed(1));
+                return { ...sub, attended: newAttended, percentage: newPercentage };
+            });
+            studentRecord.attendanceDetails = updatedSubjects;
+
+            messageElement.textContent = `Attendance updated for ${studentName}: ${newOverallPercent}%`;
+            messageElement.classList.remove('hidden', 'text-red-500');
+            messageElement.classList.add('text-green-600');
+            
+            saveState(); 
+            // Re-render the admin attendance view to show the updated current status immediately
+            renderApp();
+        }
+
+        function handlePostNotice(event) {
+            event.preventDefault();
+            const title = $('#noticeTitle').value;
+            const content = $('#noticeContent').value;
+            const messageElement = $('#notice-message');
+
+            const newNotice = {
+                id: generateId('N'),
+                title: title,
+                content: content,
+                date: formatDate(new Date()),
+                createdAt: new Date(),
+                postedBy: state.user.name
+            };
+
+            state.appData.notices.unshift(newNotice);
+            
+            messageElement.textContent = 'Notice posted successfully!';
+            messageElement.classList.remove('hidden', 'text-red-500');
+            messageElement.classList.add('text-green-600');
+            
+            $('#noticeTitle').value = '';
+            $('#noticeContent').value = '';
+
+            saveState(); 
+            renderApp();
+        }
+
+        function handleAdminAction(event) {
+            const button = event.target.closest('.action-btn');
+            if (!button) return;
+
+            const appId = button.dataset.id;
+            const action = button.dataset.action;
+            const appIndex = state.appData.applications.findIndex(app => app.id === appId);
+
+            if (appIndex === -1) return;
+
+            const applicant = state.appData.applications[appIndex];
+            const applicantEmail = applicant.studentId;
+
+            if (action === 'approve') {
+                applicant.status = 'Approved';
+                
+                // CRITICAL FIX: Promote the applicant by initializing their record completely
+                const applicantAccount = state.accounts.find(a => a.email === applicantEmail);
+                if (applicantAccount) {
+                    // Update user role to student if they registered as admin and were approved to be a student. (Though roles are selected at registration, this ensures full promotion)
+                    applicantAccount.role = 'student'; 
+                }
+
+                const applicantRecord = state.appData.studentRecords[applicantEmail];
+                if (applicantRecord) {
+                    applicantRecord.finance.totalFee = 15000;
+                    applicantRecord.finance.dueAmount = 15000;
+                    applicantRecord.finance.paidFee = 0;
+                    applicantRecord.totalClasses = 80;
+                    applicantRecord.attendedClasses = 0;
+                    applicantRecord.attendanceDetails = JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.attendanceDetails));
+                    applicantRecord.marks = JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.marks));
+                }
+
+            } else if (action === 'reject') {
+                applicant.status = 'Rejected';
+            } else if (action === 'delete') {
+                if (!confirm("Are you sure you want to delete this application?")) return;
+                state.appData.applications.splice(appIndex, 1);
+            }
+            saveState(); 
+            renderApp();
+        }
+        
+        function handleMarksUpdate(event) {
+            event.preventDefault();
+            const studentId = $('#marksStudentId').value;
+            const messageElement = $('#marks-message');
+            
+            const studentRecord = state.appData.studentRecords[studentId];
+
+            if (!studentRecord) {
+                 messageElement.textContent = 'Error: Student record not found.';
+                 messageElement.classList.remove('hidden', 'text-green-600');
+                 messageElement.classList.add('text-red-500');
+                 return;
+            }
+
+            const studentMarks = studentRecord.marks;
+
+            let allValid = true;
+            $$('.subject-mark-input').forEach(input => {
+                const subject = input.name;
+                const mark = parseInt(input.value, 10);
+                
+                if (isNaN(mark) || mark < 0 || mark > 100) {
+                    allValid = false;
+                }
+                
+                studentMarks[subject] = mark;
+            });
+
+            if (!allValid) {
+                 messageElement.textContent = 'Error: All marks must be between 0 and 100.';
+                 messageElement.classList.remove('hidden', 'text-green-600');
+                 messageElement.classList.add('text-red-500');
+                 return;
+            }
+
+            messageElement.textContent = `Marks for ${studentId} updated successfully!`;
+            messageElement.classList.remove('hidden', 'text-red-500');
+            messageElement.classList.add('text-green-600');
+            
+            saveState(); 
+            renderApp();
+        }
+        
+        function handleExamQuestionLinkUpdate(event) {
+            event.preventDefault();
+            const subject = $('#examSubject').value;
+            const questionUrl = $('#questionLink').value.trim();
+            const messageElement = $('#exam-message');
+
+            const exam = state.examTimetable.find(e => e.subject === subject);
+
+            if (exam) {
+                exam.questionUrl = questionUrl || null;
+                messageElement.textContent = `Question link for ${subject} updated successfully!`;
+                messageElement.classList.remove('hidden', 'text-red-500');
+                messageElement.classList.add('text-green-600');
+                saveState();
+                
+                // Clear the input field after successful save, but keep the dropdown selection
+                $('#questionLink').value = '';
+                
+            } else {
+                messageElement.textContent = `Error: Exam for ${subject} not found.`;
+                messageElement.classList.remove('hidden', 'text-green-600');
+                messageElement.classList.add('text-red-500');
+            }
+        }
+
+
+        // --- UTILITY/HELPER FUNCTIONS ---
+        
+        function generateId(prefix = 'ID') {
+            return prefix + Date.now().toString().slice(-4) + Math.random().toString(36).substring(2, 6).toUpperCase();
+        }
+
+        function formatDate(date) {
+            if (!date) return 'N/A';
+            if (date.toDate) date = date.toDate(); 
+
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        function getStudentApplication(userEmail) {
+            return state.appData.applications.find(app => app.studentId === userEmail);
+        }
+        
+        function getStudentAttendance(userEmail) {
+            // Get attendance summary from the user's main record
+            const record = state.appData.studentRecords[userEmail];
+            // Provide default structure if record doesn't exist yet (e.g., brand new user)
+            // FIX: Ensure attendanceDetails structure is available even on default return
+            const defaultRecord = { 
+                totalClasses: 0, 
+                attendedClasses: 0, 
+                attendanceDetails: JSON.parse(JSON.stringify(DEMO_MASTER_STUDENT_DATA.attendanceDetails.map(d => ({...d, attended: 0, percentage: 0}))))
+            };
+            return record || defaultRecord;
+        }
+
+        // This function is defined globally to be accessible by inline HTML onclick handlers
+        window.changeView = function(newView) {
+            state.view = newView;
+            renderApp();
+        }
+        
+        function renderApplicationStatusCard(application) {
+            let statusText = 'Application Pending';
+            let statusColor = 'bg-blue-500';
+            let message = 'Your application has not been submitted yet. Click below to start the process.';
+            let actionText = 'Start Application';
+            let actionView = 'student-form';
+            let icon = 'fas fa-hourglass-half';
+
+            if (application) {
+                switch (application.status) {
+                    case 'Pending':
+                        statusText = 'Pending Review';
+                        statusColor = 'bg-yellow-500';
+                        message = `Your application for ${application.course} was submitted on ${formatDate(application.submissionDate)}. Waiting for administration review.`;
+                        actionText = 'Review Submission';
+                        actionView = 'student-form';
+                        icon = 'fas fa-file-signature';
+                        break;
+                    case 'Approved':
+                        statusText = 'Approved!';
+                        statusColor = 'bg-green-600';
+                        message = `Congratulations! Your application for ${application.course} has been approved. Welcome to the school!`;
+                        actionText = 'View Details';
+                        actionView = 'student-profile';
+                        icon = 'fas fa-check-circle';
+                        break;
+                    case 'Rejected':
+                        statusText = 'Application Rejected';
+                        statusColor = 'bg-red-600';
+                        message = `Your application was rejected on ${formatDate(new Date())}. Contact the admissions office for more information.`;
+                        actionText = 'Contact Admissions';
+                        actionView = 'student-profile';
+                        icon = 'fas fa-times-circle';
+                        break;
+                }
+            } else {
+                 statusColor = 'bg-gray-400';
+                 icon = 'fas fa-file-alt';
+            }
+
+            return `
+                <div class="p-6 bg-white rounded-2xl shadow-lg border-l-4 ${statusColor.replace('bg-', 'border-')}">
+                    <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+                        <i class="${icon} mr-3 text-lg ${statusColor.replace('bg-', 'text-')}"></i> Application Status
+                    </h3>
+                    <p class="text-xl font-bold text-gray-900 mt-2">${statusText}</p>
+                    <p class="text-sm text-gray-600 mt-2">${message}</p>
+                    <button onclick="changeView('${actionView}')" class="mt-4 text-sm font-semibold text-white ${statusColor} py-2 px-4 rounded-lg hover:opacity-90 transition duration-150">
+                        ${actionText}
+                    </button>
+                </div>
+            `;
+        }
+
+        // --- UI RENDERING FUNCTIONS (continued) ---
+        
+        function renderSidebar(activeLink) {
+            const links = [
+                // Admin links
+                ...(state.user.role === 'admin' ? [
+                    { name: 'Dashboard', view: 'admin', icon: 'fas fa-chart-line' },
+                    { name: 'Marks Management', view: 'admin-marks', icon: 'fas fa-pen-to-square' },
+                    { name: 'Attendance Management', view: 'admin-attendance', icon: 'fas fa-user-check' }, 
+                    { name: 'Exam Question Links', view: 'admin-exam-links', icon: 'fas fa-link' },
+                    { name: 'View Applications', view: 'admin-applications', icon: 'fas fa-list-check' }
+                ] : []),
+                
+                // Student links
+                ...(state.user.role === 'student' ? [
+                    { name: 'Home', view: 'student-home', icon: 'fas fa-home' },
+                    { name: 'Full Dashboard', view: 'student-dashboard', icon: 'fas fa-chart-line' },
+                    { name: 'Scorecard', view: 'student-scorecard', icon: 'fas fa-receipt' },
+                    { name: 'Exam Timetable', view: 'student-exams', icon: 'fas fa-calendar-check' }, 
+                    { name: 'Profile & Settings', view: 'student-profile', icon: 'fas fa-user-circle' },
+                    { name: 'Detailed Attendance', view: 'student-attendance-detail', icon: 'fas fa-clipboard-list' },
+                    { name: 'Finance & Fees', view: 'student-finance', icon: 'fas fa-money-bill-wave' },
+                    { name: 'Application Form', view: 'student-form', icon: 'fas fa-file-alt' }
+                ] : [])
+            ];
+
+            return `
+                <div id="sidebar" class="sidebar bg-white h-screen border-r border-gray-200 p-6 flex flex-col shadow-2xl md:shadow-none">
+                    <div class="text-2xl font-bold text-blue-600 mb-10 flex items-center">
+                        <i class="fas fa-graduation-cap mr-3"></i>
+                        ${state.user.role === 'admin' ? 'Admin Portal' : 'Student Hub'}
+                    </div>
+                    <nav class="space-y-2">
+                        ${links.map(link => `
+                            <a href="#" data-view="${link.view}" class="nav-link flex items-center px-4 py-3 rounded-xl transition duration-150 ${activeLink === link.view ? 'bg-blue-500 text-white font-semibold shadow-md' : 'text-gray-600 hover:bg-gray-100'}">
+                                <i class="${link.icon} w-5"></i>
+                                <span class="ml-3">${link.name}</span>
+                            </a>
+                        `).join('')}
+                    </nav>
+                    <div class="mt-auto pt-6 border-t border-gray-100">
+                        <button id="logout-btn" class="w-full flex items-center justify-center py-2 px-4 text-sm font-medium text-red-600 bg-red-100 rounded-lg hover:bg-red-200 transition duration-150">
+                            <i class="fas fa-sign-out-alt mr-2"></i> Logout (${state.user.name})
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderHeader() {
+            return `
+                <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm">
+                    <button id="sidebar-toggle" class="md:hidden text-gray-600 hover:text-blue-600">
+                        <i class="fas fa-ellipsis-v text-xl"></i>
+                    </button>
+                    <div class="relative flex items-center space-x-4 ml-auto">
+                        <div class="text-gray-700 text-sm hidden sm:block">
+                            Welcome, <span class="font-semibold">${state.user.name}</span>
+                        </div>
+                        <img src="${state.user.photoUrl}" onerror="this.onerror=null; this.src='https://placehold.co/128x128/9ca3af/ffffff?text=${state.user.name.split(' ').map(n => n[0]).join('')}'" alt="Profile Picture" class="w-8 h-8 rounded-full object-cover border border-gray-300">
+                    </div>
+                </header>
+            `;
+        }
+        
+        function renderTeacherSchedule() {
+            const sortedSchedule = state.schedule.slice().sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
+            
+            return `
+                <div class="col-span-full bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-calendar-alt mr-3 text-blue-500"></i> Teacher Availability Schedule
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-blue-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Day</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Time</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Course/Topic</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Teacher</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Room</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-100">
+                                ${sortedSchedule.map(item => `
+                                    <tr class="hover:bg-gray-50 transition duration-100">
+                                        <td class="px-4 py-3 whitespace-nowrap font-semibold">${item.day}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-gray-700">${item.time}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-gray-800">${item.course}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-gray-600">${item.teacher}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-blue-600 font-medium">${item.room}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="mt-4 text-xs text-gray-500">Note: Office Hours are for one-on-one discussion with the teacher.</p>
+                </div>
+            `;
+        }
+
+        function renderLatestNoticeCard(notice) {
+             if (!notice) {
+                return `
+                    <div class="col-span-full p-8 bg-white rounded-2xl shadow-xl border-l-4 border-gray-400">
+                        <h3 class="text-xl font-semibold text-gray-800 flex items-center">
+                            <i class="fas fa-bell mr-3 text-gray-500"></i> No Notices Yet
+                        </h3>
+                        <p class="mt-2 text-gray-600">The administration has not posted any announcements. Check back later!</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="col-span-full p-8 bg-white rounded-2xl shadow-xl border-l-4 border-red-500">
+                    <h3 class="text-xl font-bold text-gray-900 flex items-center">
+                        <i class="fas fa-bullhorn mr-3 text-red-500"></i> LATEST ANNOUNCEMENT
+                    </h3>
+                    <p class="text-3xl font-extrabold text-red-600 mt-4">${notice.title}</p>
+                    <p class="text-gray-700 mt-3 leading-relaxed">${notice.content}</p>
+                    <p class="text-sm text-gray-500 mt-4 border-t pt-3">
+                        Posted: ${formatDate(notice.createdAt)} by ${notice.postedBy}
+                    </p>
+                </div>
+            `;
+        }
+
+        // --- NEW: STUDENT HOME VIEW ---
+        function renderStudentHome() {
+            state.view = 'student-home';
+            const application = getStudentApplication(state.user.email);
+            const latestNotice = state.appData.notices.length > 0 ? state.appData.notices[0] : null;
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Welcome Home, ${state.user.name}!</h1>
+                    
+                    <div class="grid grid-cols-1 gap-6">
+                        ${renderLatestNoticeCard(latestNotice)}
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        ${renderApplicationStatusCard(application)}
+                        
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-l-4 border-blue-500 flex flex-col justify-between">
+                            <h3 class="text-lg font-semibold text-gray-800">Full Academic Overview</h3>
+                            <p class="text-sm text-gray-600 mt-1">View all charts, schedules, and summaries.</p>
+                            <button onclick="changeView('student-dashboard')" class="mt-4 text-sm text-blue-600 hover:text-blue-800 font-medium text-left">
+                                Go to Dashboard <i class="fas fa-arrow-right ml-1 text-sm"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-l-4 border-green-500 flex flex-col justify-between">
+                            <h3 class="text-lg font-semibold text-gray-800">Manage Finances</h3>
+                            <p class="text-sm text-gray-600 mt-1">Check dues and make fee payments.</p>
+                            <button onclick="changeView('student-finance')" class="mt-4 text-sm text-green-600 hover:text-green-800 font-medium text-left">
+                                Pay Fees Now <i class="fas fa-arrow-right ml-1 text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- STUDENT SCORECARD VIEW ---
+        function renderStudentScorecard() {
+            state.view = 'student-scorecard';
+            const studentMarks = state.currentUserData?.marks || {};
+            const subjects = Object.keys(studentMarks);
+            const totalMarks = subjects.length * 100;
+            const obtainedMarks = subjects.reduce((sum, subject) => sum + studentMarks[subject], 0);
+            const percentage = subjects.length > 0 ? (obtainedMarks / totalMarks) * 100 : 0;
+            
+            let status = 'Awaiting Marks';
+            if (subjects.length > 0) {
+                if (percentage >= 85) status = 'Excellent';
+                else if (percentage >= 70) status = 'Good';
+                else if (percentage >= 50) status = 'Average';
+                else status = 'Needs Improvement';
+            }
+            const statusClass = status === 'Excellent' ? 'bg-green-500' : (status === 'Good' ? 'bg-blue-500' : (status === 'Average' ? 'bg-yellow-500' : 'bg-red-500'));
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Academic Scorecard (${state.user.name})</h1>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-t-4 border-blue-500 text-center">
+                            <p class="text-sm text-gray-500">Overall Percentage</p>
+                            <p class="text-4xl font-extrabold text-blue-600 mt-1">${percentage.toFixed(1)}%</p>
+                        </div>
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-t-4 ${statusClass.split('-').pop()} text-center">
+                            <p class="text-sm text-gray-500">Performance Status</p>
+                            <p class="text-2xl font-bold text-gray-900 mt-2">
+                                <span class="text-white ${statusClass} px-3 py-1 rounded-full">${status}</span>
+                            </p>
+                        </div>
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-t-4 border-gray-400 text-center">
+                            <p class="text-sm text-gray-500">Total Score (Out of ${totalMarks})</p>
+                            <p class="text-4xl font-bold text-gray-900 mt-1">${obtainedMarks}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Subject-wise Marks</h3>
+                        ${subjects.length > 0 ? `
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Marks Obtained (Out of 100)</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-100">
+                                        ${subjects.map(subjectKey => {
+                                            const mark = studentMarks[subjectKey];
+                                            const subjectName = subjectKey.replace(/_/g, ' ');
+                                            const gradeStatus = mark >= 90 ? 'A+' : (mark >= 80 ? 'A' : (mark >= 70 ? 'B' : (mark >= 60 ? 'C' : 'F')));
+                                            const statusColor = gradeStatus === 'F' ? 'text-red-600' : 'text-green-600';
+
+                                            return `
+                                                <tr class="hover:bg-gray-50 transition duration-100">
+                                                    <td class="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">${subjectName}</td>
+                                                    <td class="px-6 py-4 whitespace-nowrap text-center text-lg font-extrabold ${statusColor}">${mark}</td>
+                                                    <td class="px-6 py-4 whitespace-nowrap">
+                                                        <span class="text-sm font-medium ${statusColor}">${gradeStatus}</span>
+                                                    </td>
+                                                </tr>
+                                            `;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `
+                            <div class="p-4 text-center text-gray-500">
+                                <i class="fas fa-exclamation-circle text-xl mb-2"></i>
+                                <p>Mark sheet not yet released by the administration.</p>
+                            </div>
+                        `}
+                        <p class="mt-6 text-sm text-gray-500 border-t pt-4">Marks are final once released. Contact the academic office for appeal procedures.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- ADMIN MARKS MANAGEMENT VIEW ---
+        function renderAdminMarksManagement() {
+            state.view = 'admin-marks';
+            
+            const registeredStudents = state.accounts.filter(acc => acc.role === 'student');
+            const defaultStudentId = registeredStudents.length > 0 ? registeredStudents[0].email : ''; 
+            const selectedStudentId = $('#marksStudentId')?.value || defaultStudentId;
+            
+            // Get data from the full record list using the selected email/ID
+            const student = state.appData.studentRecords[selectedStudentId] || { name: 'N/A', email: selectedStudentId, marks: {} };
+            const currentMarks = student.marks || {};
+            
+            const subjects = ['Financial_Modeling', 'Accounting_I', 'Investments'];
+            const studentName = registeredStudents.find(s => s.email === selectedStudentId)?.name || 'N/A';
+
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Marks Management Portal</h1>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Select Student for Marks Entry</h3>
+                        ${registeredStudents.length > 0 ? `
+                            <div class="flex items-center space-x-4">
+                                <select id="marksStudentId" class="block w-full md:w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    ${registeredStudents.map(s => `
+                                        <option value="${s.email}" ${s.email === selectedStudentId ? 'selected' : ''}>
+                                            ${s.name} (${s.email})
+                                        </option>
+                                    `).join('')}
+                                </select>
+                                <button type="button" id="load-marks-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-md transition duration-150">
+                                    Load Marks
+                                </button>
+                            </div>
+                        ` : `
+                            <p class="text-gray-500">No students have registered yet to manage marks.</p>
+                        `}
+                    </div>
+                    
+                    ${registeredStudents.length > 0 ? `
+                        <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">Enter Marks for: ${studentName}</h3>
+                            <form id="marks-form" class="space-y-4">
+                                <input type="hidden" name="studentId" value="${selectedStudentId}">
+                                ${subjects.map(subjectKey => `
+                                    <div>
+                                        <label for="${subjectKey}" class="block text-sm font-medium text-gray-700">${subjectKey.replace(/_/g, ' ')} (Out of 100)</label>
+                                        <input id="${subjectKey}" name="${subjectKey}" type="number" min="0" max="100" value="${currentMarks[subjectKey] || 0}" required class="subject-mark-input mt-1 block w-full md:w-1/2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    </div>
+                                `).join('')}
+                                
+                                <div id="marks-message" class="text-center text-sm hidden"></div>
+                                
+                                <button type="submit" class="w-full md:w-1/2 flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 transition duration-150">
+                                    <i class="fas fa-save mr-2"></i> Save Marks
+                                </button>
+                            </form>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        // --- NEW ADMIN ATTENDANCE MANAGEMENT VIEW ---
+        function renderAdminAttendanceManagement() {
+            state.view = 'admin-attendance';
+            const registeredStudents = state.accounts.filter(acc => acc.role === 'student');
+
+            const defaultStudentId = registeredStudents.length > 0 ? registeredStudents[0].email : ''; 
+            const selectedStudentId = $('#attendanceStudentId')?.value || defaultStudentId;
+            
+            // FIX: Ensure correct studentRecord is loaded for display and form population
+            const studentRecord = state.appData.studentRecords[selectedStudentId] || { name: 'N/A', email: selectedStudentId, attendedClasses: 0, totalClasses: 0 };
+            const overallPercentage = studentRecord.totalClasses > 0 ? Math.round((studentRecord.attendedClasses / studentRecord.totalClasses) * 100) : 0;
+            const studentName = registeredStudents.find(s => s.email === selectedStudentId)?.name || 'N/A';
+            
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Attendance Management Portal</h1>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Select Student for Attendance Update</h3>
+                        ${registeredStudents.length > 0 ? `
+                            <div class="flex items-center space-x-4">
+                                <select id="attendanceStudentId" class="block w-full md:w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    ${registeredStudents.map(s => `
+                                        <option value="${s.email}" ${s.email === selectedStudentId ? 'selected' : ''}>
+                                            ${s.name} (${s.email})
+                                        </option>
+                                    `).join('')}
+                                </select>
+                                <button type="button" id="load-attendance-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-md transition duration-150">
+                                    Load Attendance
+                                </button>
+                            </div>
+                        ` : `
+                            <p class="text-gray-500">No students are currently enrolled to manage attendance.</p>
+                        `}
+                    </div>
+                    
+                    ${registeredStudents.length > 0 ? `
+                        <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">Update Records for: ${studentName}</h3>
+                            <div class="mb-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-400">
+                                <p class="text-sm text-gray-700">Current Status: 
+                                    <span class="font-bold text-blue-600">${overallPercentage}%</span> (${studentRecord.attendedClasses}/${studentRecord.totalClasses})
+                                </p>
+                            </div>
+
+                            <form id="attendance-update-form" class="space-y-4">
+                                <input type="hidden" name="studentId" value="${selectedStudentId}">
+                                <div>
+                                    <label for="attendedClasses" class="block text-sm font-medium text-gray-700">Attended Classes</label>
+                                    <input id="attendedClasses" name="attendedClasses" type="number" min="0" value="${studentRecord.attendedClasses}" required class="mt-1 block w-full md:w-1/2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label for="totalClasses" class="block text-sm font-medium text-gray-700">Total Classes</label>
+                                    <input id="totalClasses" name="totalClasses" type="number" min="1" value="${studentRecord.totalClasses}" required class="mt-1 block w-full md:w-1/2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div id="attendance-message-${selectedStudentId}" class="text-center text-sm hidden"></div>
+                                <button type="submit" class="w-full md:w-1/2 flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition duration-150">
+                                    <i class="fas fa-save mr-2"></i> Save Attendance Record
+                                </button>
+                            </form>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        // --- NEW ADMIN EXAM LINK MANAGEMENT VIEW (IMPROVED) ---
+        function renderAdminExamManagement() {
+            state.view = 'admin-exam-links';
+            
+            // Get the current question URL for the selected subject to pre-fill the form
+            const defaultSubject = state.examTimetable.length > 0 ? state.examTimetable[0].subject : '';
+            const selectedSubject = $('#examSubject')?.value || defaultSubject;
+            const currentExam = state.examTimetable.find(e => e.subject === selectedSubject) || { questionUrl: '' };
+            
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Exam Question Link Management</h1>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Attach Question Link to Exam</h3>
+                        <form id="exam-link-form" class="space-y-4">
+                            <div>
+                                <label for="examSubject" class="block text-sm font-medium text-gray-700">Select Exam Subject</label>
+                                <select id="examSubject" required class="mt-1 block w-full md:w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    ${state.examTimetable.map(exam => `
+                                        <option value="${exam.subject}" ${exam.subject === selectedSubject ? 'selected' : ''}>
+                                            ${exam.subject} (${exam.date})
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="questionLink" class="block text-sm font-medium text-gray-700">Question Paper Link (URL)</label>
+                                <div class="flex space-x-3">
+                                    <input id="questionLink" type="url" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Paste direct link here (e.g., https://i.imgur.com/paper.png)">
+                                    <button type="button" onclick="alert('In a real system, this button would open a file upload window. For this demo, please upload your image to an external hosting service (like Imgur or Google Drive) and paste the resulting direct link into the field.')" class="mt-1 flex-shrink-0 flex items-center justify-center px-4 py-2 border border-purple-600 rounded-lg shadow-sm text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 transition duration-150">
+                                        <i class="fas fa-upload mr-2"></i> Simulate Upload
+                                    </button>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500">Note: You must upload the question paper image/PDF to an external service first and paste the direct link above.</p>
+                            </div>
+                            
+                            <div id="exam-message" class="text-center text-sm hidden"></div>
+                            
+                            <button type="submit" class="w-full md:w-1/2 flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 transition duration-150">
+                                <i class="fas fa-save mr-2"></i> Save Link
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Current Exam Links</h3>
+                        <div class="space-y-3">
+                            ${state.examTimetable.map(exam => `
+                                <div class="p-3 bg-gray-50 rounded-lg border-l-4 ${exam.questionUrl ? 'border-green-400' : 'border-red-400'}">
+                                    <p class="text-sm font-semibold text-gray-900">${exam.subject}</p>
+                                    <p class="text-xs text-gray-600 mt-1 truncate" title="${exam.questionUrl || 'No Link Set'}">
+                                        Link: <span class="font-medium ${exam.questionUrl ? 'text-green-600' : 'text-red-600'}">${exam.questionUrl ? exam.questionUrl : 'N/A'}</span>
+                                    </p>
+                                    ${exam.questionUrl ? `<a href="${exam.questionUrl}" target="_blank" class="mt-1 text-xs text-purple-600 hover:text-purple-800 font-medium">View Current Linked File</a>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // --- STUDENT EXAMS VIEW (NEW) ---
+        function renderStudentExams() {
+            state.view = 'student-exams';
+            const timetable = state.examTimetable;
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Semester Exam Timetable</h1>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Upcoming Examinations</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-blue-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Date</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Time</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Subject</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">Room</th>
+                                        <th class="px-6 py-3 text-center text-xs font-medium text-blue-700 uppercase tracking-wider">Question Paper Link</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-100">
+                                    ${timetable.map(exam => {
+                                        const linkHTML = exam.questionUrl 
+                                            ? `<a href="${exam.questionUrl}" target="_blank" class="text-red-600 hover:text-red-800 font-bold flex items-center justify-center">
+                                                <i class="fas fa-file-image mr-1"></i> View Paper
+                                               </a>` 
+                                            : `<span class="text-gray-500">N/A</span>`;
+
+                                        return `
+                                            <tr class="hover:bg-gray-50 transition duration-100">
+                                                <td class="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">${exam.date}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-gray-700">${exam.time}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-gray-800">${exam.subject}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-blue-600 font-medium">${exam.room}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-center">${linkHTML}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="mt-6 text-sm text-gray-500 border-t pt-4">Question papers will be made available online on the day of the examination.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- ADMIN FINANCIAL SUMMARY CARD ---
+        function renderFinancialSummaryCard() {
+            const registeredStudents = state.accounts.filter(acc => acc.role === 'student');
+            
+            // Calculate financial stats based on registered student records
+            const totalStudents = registeredStudents.length;
+            
+            const financialRecords = registeredStudents.map(acc => {
+                const record = state.appData.studentRecords[acc.email];
+                // Ensure record exists before accessing finance
+                const finance = record ? record.finance : DEMO_MASTER_STUDENT_DATA.finance;
+
+                const due = finance.dueAmount;
+                return {
+                    name: acc.name,
+                    paidFee: finance.paidFee,
+                    totalFee: finance.totalFee,
+                    due: due,
+                    status: due === 0 ? 'Paid in Full' : 'Dues Pending'
+                };
+            });
+
+            const paidInFull = financialRecords.filter(r => r.due === 0).length;
+            const outstandingDues = totalStudents - paidInFull;
+
+            return `
+                <div class="p-6 bg-white rounded-2xl shadow-xl border border-gray-100 lg:col-span-2">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-money-bill-wave mr-3 text-green-600"></i> Student Financial Summary
+                    </h3>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
+                            <p class="text-sm text-gray-600">Total Registered</p>
+                            <p class="text-2xl font-bold text-gray-900">${totalStudents}</p>
+                        </div>
+                        <div class="p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                            <p class="text-sm text-gray-600">Paid in Full</p>
+                            <p class="text-2xl font-bold text-blue-600">${paidInFull}</p>
+                            <p class="text-xs text-gray-500">${totalStudents > 0 ? (paidInFull / totalStudents * 100).toFixed(0) : 0}%</p>
+                        </div>
+                        <div class="p-4 bg-red-50 rounded-lg border-l-4 border-red-500">
+                            <p class="text-sm text-gray-600">Outstanding Dues</p>
+                            <p class="text-2xl font-bold text-red-600">${outstandingDues}</p>
+                            <p class="text-xs text-gray-500">${totalStudents > 0 ? (outstandingDues / totalStudents * 100).toFixed(0) : 0}%</p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 overflow-x-auto">
+                         <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student Name</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-100">
+                                ${financialRecords.map(s => {
+                                    const statusClass = s.due === 0 ? 'text-green-600' : 'text-red-600';
+                                    return `
+                                        <tr>
+                                            <td class="px-4 py-2 whitespace-nowrap font-medium text-gray-900">${s.name}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap text-green-600">${CURRENCY_SYMBOL}${s.paidFee.toLocaleString()}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap text-red-600 font-medium">${CURRENCY_SYMBOL}${s.due.toLocaleString()}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap"><span class="text-xs ${statusClass}">${s.status}</span></td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdminDashboard() {
+            state.view = 'admin';
+
+            const totalStudents = state.accounts.filter(acc => acc.role === 'student').length;
+            const totalApplications = state.appData.applications.length;
+            const pendingApplications = state.appData.applications.filter(a => a.status === 'Pending').length;
+            
+            return `
+                <div class="p-6 md:p-10 space-y-8 w-full">
+                    <h1 class="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div class="p-6 bg-blue-600 text-white rounded-2xl shadow-xl flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90">Total Applications</p>
+                                <p class="text-3xl font-bold mt-1">${totalApplications}</p>
+                            </div>
+                            <i class="fas fa-file-invoice text-4xl opacity-50"></i>
+                        </div>
+                        <div class="p-6 bg-white rounded-2xl shadow-xl border border-gray-100 flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">Total Registered Students</p>
+                                <p class="text-3xl font-bold text-gray-900 mt-1">${totalStudents}</p>
+                            </div>
+                            <i class="fas fa-users text-4xl text-yellow-500 opacity-70"></i>
+                        </div>
+                        <div class="p-6 bg-white rounded-2xl shadow-xl border border-gray-100 flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-500">Pending Review</p>
+                                <p class="text-3xl font-bold text-gray-900 mt-1">${pendingApplications}</p>
+                            </div>
+                            <i class="fas fa-hourglass-half text-4xl text-red-500 opacity-70"></i>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        ${renderFinancialSummaryCard()}
+                        
+                        <div class="space-y-4">
+                            <div class="p-6 rounded-2xl shadow-xl bg-cover bg-center border border-gray-100 bg-blue-500 text-white">
+                                <h3 class="text-lg font-bold">Manage Attendance</h3>
+                                <p class="text-sm mt-2 opacity-90">Update attendance records for all students individually.</p>
+                                <button onclick="changeView('admin-attendance')" class="mt-4 text-sm font-semibold px-4 py-2 bg-white text-blue-600 rounded-lg hover:bg-gray-100 transition">
+                                    Go to Attendance Entry
+                                </button>
+                            </div>
+                            <div class="p-6 rounded-2xl shadow-xl bg-cover bg-center border border-gray-100 bg-green-500 text-white">
+                                <h3 class="text-lg font-bold">Manage Marks</h3>
+                                <p class="text-sm mt-2 opacity-90">Enter student scores via Marks Management.</p>
+                                <button onclick="changeView('admin-marks')" class="mt-4 text-sm font-semibold px-4 py-2 bg-white text-green-600 rounded-lg hover:bg-gray-100 transition">
+                                    Go to Marks Entry
+                                </button>
+                            </div>
+                            <div class="p-6 rounded-2xl shadow-xl bg-cover bg-center border border-gray-100 bg-purple-500 text-white">
+                                <h3 class="text-lg font-bold">Exam Question Links</h3>
+                                <p class="text-sm mt-2 opacity-90">Attach question image links to the timetable.</p>
+                                <button onclick="changeView('admin-exam-links')" class="mt-4 text-sm font-semibold px-4 py-2 bg-white text-purple-600 rounded-lg hover:bg-gray-100 transition">
+                                    Manage Exam Links
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        ${renderNoticePostingCard()}
+                    </div>
+                    
+                    ${renderAdminApplicationsTable(true)}
+                </div>
+            `;
+        }
+
+
+        // --- UI RENDERING FUNCTIONS (continued) ---
+
+        function renderAdminApplications() {
+            state.view = 'admin-applications';
+            return `
+                <div class="p-6 md:p-10 space-y-8 w-full">
+                    <h1 class="text-3xl font-bold text-gray-900 mb-6">View All Applications</h1>
+                    ${renderAdminApplicationsTable(false)}
+                </div>
+            `;
+        }
+
+        function renderAdminApplicationsTable(isDashboardView) {
+            let applications = state.appData.applications.slice().sort((a, b) => {
+                const timeA = a.submissionDate instanceof Date ? a.submissionDate.getTime() : new Date(a.submissionDate).getTime();
+                const timeB = b.submissionDate instanceof Date ? b.submissionDate.getTime() : new Date(b.submissionDate).getTime();
+                return timeB - timeA;
+            });
+            const total = applications.length;
+            
+            if (isDashboardView) {
+                applications = applications.slice(0, 5);
+            }
+
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-semibold text-gray-800">${isDashboardView ? 'Latest Applications' : 'All Applications'} (${total})</h3>
+                        ${isDashboardView ? `<button onclick="changeView('admin-applications')" class="text-sm text-blue-600 hover:text-blue-800">View All</button>` : ''}
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table id="admin-app-table" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application ID</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Applicant Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Course</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${applications.map(app => {
+                                    let statusClass, approveAction, rejectAction;
+                                    
+                                    if (app.status === 'Approved') {
+                                        statusClass = 'bg-green-100 text-green-800';
+                                        approveAction = `<button data-id="${app.id}" data-action="reject" class="action-btn text-red-500 hover:text-red-700 transition duration-150 p-2 rounded-full hover:bg-gray-100" title="Change to Rejected">
+                                                            <i class="fas fa-ban"></i>
+                                                        </button>`;
+                                        rejectAction = ''; 
+                                    } else if (app.status === 'Pending') {
+                                        statusClass = 'bg-yellow-100 text-yellow-800';
+                                        approveAction = `<button data-id="${app.id}" data-action="approve" class="action-btn text-green-600 hover:text-green-800 transition duration-150 p-2 rounded-full hover:bg-gray-100" title="Approve Application (Promotes to Student)">
+                                                            <i class="fas fa-check"></i>
+                                                        </button>`;
+                                        rejectAction = `<button data-id="${app.id}" data-action="reject" class="action-btn text-red-500 hover:text-red-700 transition duration-150 p-2 rounded-full hover:bg-gray-100" title="Reject Application">
+                                                            <i class="fas fa-times"></i>
+                                                        </button>`;
+                                    } else { // Rejected
+                                        statusClass = 'bg-red-100 text-red-800';
+                                        approveAction = `<button data-id="${app.id}" data-action="approve" class="action-btn text-green-600 hover:text-green-800 transition duration-150 p-2 rounded-full hover:bg-gray-100" title="Change to Approved">
+                                                            <i class="fas fa-check"></i>
+                                                        </button>`;
+                                        rejectAction = ''; 
+                                    }
+
+                                    return `
+                                        <tr>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 truncate">${app.id}</td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${app.name}</td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${app.course}</td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${formatDate(app.submissionDate)}</td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
+                                                    ${app.status}
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium space-x-2">
+                                                ${approveAction}
+                                                ${rejectAction}
+                                                <button data-id="${app.id}" data-action="delete" class="action-btn text-gray-400 hover:text-red-600 transition duration-150 p-2 rounded-full hover:bg-gray-100" title="Delete Application">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${applications.length === 0 ? '<p class="text-center text-gray-500 py-6">No applications found.</p>' : ''}
+                </div>
+            `;
+        }
+
+        function renderNoticePostingCard() {
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-edit mr-3 text-red-500"></i> Post New Notice
+                    </h3>
+                    
+                    <form id="notice-form" class="space-y-4">
+                        <div>
+                            <label for="noticeTitle" class="block text-sm font-medium text-gray-700">Title</label>
+                            <input id="noticeTitle" name="noticeTitle" type="text" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., Exam Schedule Update">
+                        </div>
+                        <div>
+                            <label for="noticeContent" class="block text-sm font-medium text-gray-700">Content</label>
+                            <textarea id="noticeContent" name="noticeContent" rows="3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Details of the announcement..."></textarea>
+                        </div>
+                        <div id="notice-message" class="text-center text-sm hidden"></div>
+                        <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition duration-150">
+                            Post Notice
+                        </button>
+                    </form>
+                </div>
+            `;
+        }
+
+
+        function renderStudentDashboard() {
+            state.view = 'student-dashboard'; 
+            const application = getStudentApplication(state.user.email);
+            
+            let noApplicationCard = '';
+            if (!application) {
+                noApplicationCard = `
+                    <div class="col-span-full p-6 bg-white rounded-2xl shadow-lg border-t-4 border-yellow-500 mb-8">
+                        <h3 class="text-xl font-semibold text-gray-800">Application Status</h3>
+                        <p class="mt-2 text-gray-600">You haven't submitted your application yet. Click below to start.</p>
+                        <button onclick="changeView('student-form')" class="mt-4 bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2 px-4 rounded-lg shadow-md transition duration-150">
+                            <i class="fas fa-file-alt mr-2"></i> Start Application
+                        </button>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="p-6 md:p-10 space-y-6">
+                    <h1 class="text-3xl font-bold text-gray-900">Academic Overview</h1>
+                    
+                    ${noApplicationCard}
+
+                    <div class="grid grid-cols-1 gap-6">
+                        ${renderTeacherSchedule()}
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${renderAttendanceSummaryCard()}
+                        ${renderExamTimetable()}
+                        ${state.appData.notices.length > 0 ? renderNotices() : renderLoadingCard("Notices")}
+                    </div>
+
+                </div>
+            `;
+        }
+
+        function renderAttendanceSummaryCard() {
+            // Get overall attendance from master record
+            const masterAttendance = getStudentAttendance(state.user.email);
+            const { totalClasses = 0, attendedClasses = 0 } = masterAttendance;
+            
+            // Subject breakdown is from the current user's initialized record
+            const subjects = masterAttendance.attendanceDetails || [];
+
+            const overallPercentage = totalClasses > 0 ? Math.round((attendedClasses / totalClasses) * 100) : 0;
+            
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full flex flex-col">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-chart-pie mr-3 text-green-500"></i> Attendance Summary
+                    </h3>
+                    
+                    <div class="flex-grow flex flex-col justify-center items-center relative mb-4">
+                        <div class="w-32 h-32 md:w-40 md:h-40 relative">
+                            <canvas id="attendance-donut-chart"></canvas>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                <p class="text-3xl font-bold text-green-600 leading-none">${overallPercentage}%</p>
+                                <p class="text-xs text-gray-500 mt-1">Overall</p>
+                            </div>
+                        </div>
+                        <button onclick="changeView('student-attendance-detail')" class="mt-4 text-sm text-blue-600 hover:text-blue-800 font-medium transition duration-150">
+                            View Details <i class="fas fa-arrow-right ml-1 text-sm"></i>
+                        </button>
+                    </div>
+
+                    <h4 class="text-sm font-semibold text-gray-700 mt-4 mb-2 border-t pt-2">Subject Breakdown:</h4>
+                    <div class="space-y-3">
+                        ${subjects.map(subject => {
+                            // Subject attendance percentage is now based on the ratio derived from the master list change
+                            const overallRatio = totalClasses > 0 ? attendedClasses / totalClasses : 0;
+                            const currentAttended = Math.round(subject.total * overallRatio);
+                            const currentPercentage = parseFloat(((currentAttended / subject.total) * 100).toFixed(1));
+
+                            const width = currentPercentage;
+                            return `
+                                <div>
+                                    <div class="flex justify-between text-xs mb-0.5">
+                                        <span class="text-gray-700">${subject.name}</span>
+                                        <span class="font-medium text-blue-600">${currentPercentage}%</span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                        <div class="bg-blue-500 h-1.5 rounded-full" style="width: ${width}%;"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <p class="mt-4 text-xs text-red-500">*Attendance below 75% may result in debarment from exams.</p>
+                </div>
+            `;
+        }
+
+        function renderExamTimetable() {
+            // This displays the widget version, with a link to the full view
+            const firstThreeExams = state.examTimetable.slice(0, 3);
+            
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full flex flex-col">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-clock mr-3 text-yellow-500"></i> Finance Exam Timetable
+                    </h3>
+                    <div class="space-y-3 flex-grow">
+                        ${firstThreeExams.map(exam => `
+                            <div class="p-3 bg-yellow-50 rounded-lg border-l-4 border-yellow-400">
+                                <p class="text-sm font-semibold text-gray-900">${exam.subject}</p>
+                                <p class="text-xs text-gray-600 mt-1">
+                                    <i class="far fa-calendar-alt mr-1"></i> ${exam.date} @ ${exam.time}
+                                    <span class="ml-2 text-yellow-700 font-medium">| ${exam.room}</span>
+                                </p>
+                                ${exam.questionUrl ? `
+                                    <a href="${exam.questionUrl}" target="_blank" class="mt-2 inline-flex items-center text-xs font-bold text-red-600 hover:text-red-800 transition duration-150">
+                                        <i class="fas fa-file-image mr-1.5"></i> View Question Paper
+                                    </a>
+                                ` : `
+                                    <p class="mt-2 text-xs text-gray-500">Question paper link not yet active.</p>
+                                `}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button onclick="changeView('student-exams')" class="mt-4 text-xs text-blue-600 hover:text-blue-800 text-left font-medium">
+                        View Full Exam Schedule <i class="fas fa-arrow-right ml-1 text-sm"></i>
+                    </button>
+                </div>
+            `;
+        }
+
+        function renderNotices() {
+            if (state.appData.notices.length === 0) return renderLoadingCard("Notices");
+
+            const latestNotices = state.appData.notices.slice(0, 3);
+            
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full flex flex-col">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-bullhorn mr-3 text-red-500"></i> Latest Notices
+                    </h3>
+                    <div class="space-y-4 flex-grow">
+                        ${latestNotices.map(notice => `
+                            <div>
+                                <p class="text-sm font-bold text-gray-900">${notice.title}</p>
+                                <p class="text-xs text-gray-600 truncate mt-0.5">${notice.content}</p>
+                                <p class="text-[10px] text-gray-400 mt-1">Posted: ${formatDate(notice.createdAt)} by ${notice.postedBy}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="mt-4 text-xs text-blue-600 hover:text-blue-800 text-left font-medium">
+                        View All Announcements <i class="fas fa-arrow-right ml-1 text-sm"></i>
+                    </button>
+                </div>
+            `;
+        }
+        
+        function renderLoadingCard(title) {
+            return `
+                <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full flex flex-col items-center justify-center text-gray-500">
+                    <i class="fas fa-sync fa-spin text-xl mb-2"></i>
+                    <p>Loading ${title}...</p>
+                </div>
+            `;
+        }
+
+        function renderStudentProfile() {
+            state.view = 'student-profile';
+            const profile = state.user;
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Student Profile & Settings</h1>
+                    
+                    <div class="bg-white p-8 rounded-2xl shadow-xl border border-gray-100 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        
+                        <div class="lg:col-span-1 border-r border-gray-100 lg:pr-8 text-center">
+                            <img id="profile-photo" src="${profile.photoUrl}" onerror="this.onerror=null; this.src='https://placehold.co/128x128/9ca3af/ffffff?text=${profile.name.split(' ').map(n => n[0]).join('')}'" alt="Profile Picture" class="w-32 h-32 rounded-full mx-auto object-cover border-4 border-blue-500 shadow-md">
+                            <h2 class="text-2xl font-bold text-gray-900 mt-4">${profile.name}</h2>
+                            <p class="text-sm text-blue-600 font-medium">Enrolled Student</p>
+                            <p class="text-xs text-gray-500 mt-1 truncate" title="${profile.email}">Student ID: ${profile.email}</p>
+                            
+                            <button id="update-photo-btn" class="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg text-sm transition duration-150">
+                                <i class="fas fa-camera mr-2"></i> Update Photo
+                            </button>
+                        </div>
+                        
+                        <div class="lg:col-span-2 space-y-4">
+                            <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Account Details</h3>
+                            <div class="grid grid-cols-2 gap-4 text-sm">
+                                <p class="text-gray-500 font-medium">Full Name:</p>
+                                <p class="text-gray-800 font-semibold">${profile.name}</p>
+
+                                <p class="text-gray-500 font-medium">User ID:</p>
+                                <p class="text-gray-800 truncate">${profile.email}</p>
+
+                                <p class="text-gray-500 font-medium">Role:</p>
+                                <p class="text-blue-600 truncate">${profile.role}</p>
+
+                                <p class="text-gray-500 font-medium">Enrollment Date:</p>
+                                <p class="text-gray-800">2023-08-20 (Demo)</p>
+                            </div>
+
+                            <button class="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg text-sm transition duration-150" disabled>
+                                <i class="fas fa-lock mr-2"></i> Change Password (Demo)
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">General Settings</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                <div>
+                                    <p class="font-medium text-gray-800">Email Notifications</p>
+                                    <p class="text-xs text-gray-500">Receive alerts for grades and notices.</p>
+                                </div>
+                                <div class="w-10 h-5 flex items-center bg-green-500 rounded-full p-1 cursor-pointer">
+                                    <div class="bg-white w-3 h-3 rounded-full shadow-md transform translate-x-4"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderStudentAttendanceDetail() {
+            state.view = 'student-attendance-detail';
+            const studentData = state.currentUserData;
+
+            // Get overall attendance from master record
+            const masterAttendance = getStudentAttendance(state.user.email);
+            const { totalClasses = 0, attendedClasses = 0 } = masterAttendance;
+            
+            // Subject breakdown is from the current user's initialized record
+            const subjects = masterAttendance.attendanceDetails;
+            
+            const overallPercentage = totalClasses > 0 ? Math.round((attendedClasses / totalClasses) * 100) : 0;
+            const overallRatio = totalClasses > 0 ? attendedClasses / totalClasses : 0;
+
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Detailed Attendance Report</h1>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100 flex justify-between items-center border-l-8 border-green-500">
+                        <div>
+                            <p class="text-xl text-gray-600">Overall Attendance</p>
+                            <p class="text-4xl font-extrabold text-green-600 mt-1">${overallPercentage}%</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-2xl font-bold text-gray-800">${attendedClasses} / ${totalClasses}</p>
+                            <p class="text-sm text-gray-500">Classes Attended vs. Total</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-4">Subject-wise Breakdown</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject Name</th>
+                                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Attended</th>
+                                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Percentage</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-100">
+                                    ${subjects.map(sub => {
+                                        const currentAttended = Math.round(sub.total * overallRatio);
+                                        const currentPercentage = parseFloat(((currentAttended / sub.total) * 100).toFixed(1));
+                                        
+                                        const statusColor = currentPercentage >= 90 ? 'text-green-600' : (currentPercentage >= 75 ? 'text-yellow-600' : 'text-red-600');
+                                        const statusText = currentPercentage >= 90 ? 'Excellent' : (currentPercentage >= 75 ? 'Good' : 'Critical');
+
+                                        return `
+                                            <tr class="hover:bg-gray-50 transition duration-100">
+                                                <td class="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">${sub.name}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-center">${currentAttended}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-center">${sub.total}</td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-center font-bold ${statusColor}">${currentPercentage}%</td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <span class="text-xs font-medium ${statusColor}">${statusText}</span>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="mt-6 text-sm text-gray-500 border-t pt-4">Attendance records are updated weekly. Contact the academic office for discrepancies.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderStudentFinance() {
+            state.view = 'student-finance';
+            const studentData = state.currentUserData;
+
+            const finance = studentData.finance;
+            const statusColor = finance.dueAmount > 0 ? 'bg-red-500' : 'bg-green-500';
+
+            return `
+                <div class="p-6 md:p-10 space-y-8">
+                    <h1 class="text-3xl font-bold text-gray-900">Finance & Fee Management</h1>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border border-gray-100">
+                            <p class="text-sm text-gray-500">Total Fee</p>
+                            <p class="text-3xl font-bold text-gray-900 mt-1">${CURRENCY_SYMBOL}${finance.totalFee.toLocaleString()}</p>
+                        </div>
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border border-gray-100">
+                            <p class="text-sm text-gray-500">Total Paid</p>
+                            <p class="text-3xl font-bold text-green-600 mt-1">${CURRENCY_SYMBOL}${finance.paidFee.toLocaleString()}</p>
+                        </div>
+                        <div class="p-6 ${statusColor} text-white rounded-2xl shadow-lg">
+                            <p class="text-sm opacity-90">Amount Due</p>
+                            <p class="text-3xl font-bold mt-1">${CURRENCY_SYMBOL}${finance.dueAmount.toLocaleString()}</p>
+                            <p class="text-xs mt-2 font-medium">Deadline: ${finance.dueDeadline}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-1 bg-white p-6 rounded-2xl shadow-xl border border-gray-100 h-full">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">Make a Payment</h3>
+                            <p class="text-sm text-gray-600 mb-4">Pay outstanding fees securely online.</p>
+                            
+                            <form id="payment-form" class="space-y-4">
+                                <div>
+                                    <label for="paymentAmount" class="block text-sm font-medium text-gray-700">Amount to Pay (Max ${CURRENCY_SYMBOL}${finance.dueAmount.toLocaleString()})</label>
+                                    <input id="paymentAmount" type="number" min="1" max="${finance.dueAmount}" value="${finance.dueAmount > 0 ? finance.dueAmount : ''}" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" ${finance.dueAmount === 0 ? 'disabled' : ''}>
+                                </div>
+                                <div id="payment-message" class="text-center text-sm hidden"></div>
+                                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition duration-150" ${finance.dueAmount === 0 ? 'disabled' : ''}>
+                                    <i class="fas fa-credit-card mr-2"></i> Pay Now
+                                </button>
+                                ${finance.dueAmount === 0 ? `<p class="text-center text-xs text-green-600 font-medium">No fees currently due.</p>` : ''}
+                            </form>
+                        </div>
+
+                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">Payment History</h3>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-100">
+                                        ${finance.transactions.slice().reverse().map(t => { 
+                                            const tStatusColor = t.status === 'Paid' ? 'text-green-600' : 'text-red-600';
+                                            return `
+                                                <tr class="hover:bg-gray-50 transition duration-100">
+                                                    <td class="px-6 py-4 whitespace-nowrap text-gray-600">${t.date}</td>
+                                                    <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-800">${t.description}</td>
+                                                    <td class="px-6 py-4 whitespace-nowrap text-right font-semibold text-gray-900">${CURRENCY_SYMBOL}${t.amount.toLocaleString()}</td>
+                                                    <td class="px-6 py-4 whitespace-nowrap text-center">
+                                                        <span class="text-xs font-medium ${tStatusColor}">${t.status}</span>
+                                                    </td>
+                                                </tr>
+                                            `;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderApplicationForm() {
+            state.view = 'student-form';
+            const existingApplication = getStudentApplication(state.user.email);
+            const isSubmitted = !!existingApplication;
+
+            if (isSubmitted) {
+                let messageColor = existingApplication.status === 'Approved' ? 'border-green-500' : 'border-blue-500';
+                if (existingApplication.status === 'Rejected') messageColor = 'border-red-500';
+
+                return `
+                    <div class="p-8">
+                        <h1 class="text-3xl font-bold text-gray-900 mb-6">Application Form</h1>
+                        <div class="p-6 bg-white rounded-2xl shadow-lg border-l-4 ${messageColor}">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-2">Application Already Submitted</h3>
+                            <p class="text-gray-600">You submitted your application on ${formatDate(existingApplication.submissionDate)}.</p>
+                            <p class="mt-2 text-sm">Current Status: <span class="font-bold text-blue-600">${existingApplication.status}</span></p>
+                            <button onclick="changeView('student-home')" class="mt-4 text-blue-600 hover:text-blue-800 font-medium">
+                                <i class="fas fa-arrow-left mr-2"></i> Go to Home
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="p-8">
+                    <h1 class="text-3xl font-bold text-gray-900 mb-6">New Application Form</h1>
+                    <div class="bg-white p-8 rounded-2xl shadow-lg">
+                        <form id="application-form" class="space-y-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="fullName" class="block text-sm font-medium text-gray-700">Full Name</label>
+                                    <input id="fullName" type="text" required value="${state.user.name}" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="John Doe">
+                                </div>
+                                <div>
+                                    <label for="email" class="block text-sm font-medium text-gray-700">Email Address</label>
+                                    <input id="email" type="email" required value="${state.user.email}" disabled class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500" placeholder="you@example.com">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="course" class="block text-sm font-medium text-gray-700">Course Preference</label>
+                                <select id="course" required class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Select a Course</option>
+                                    <option>Computer Science</option>
+                                    <option>Business Management</option>
+                                    <option>Electrical Engineering</option>
+                                    <option>Liberal Arts</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="personalStatement" class="block text-sm font-medium text-gray-700">Personal Statement (Max 500 chars)</label>
+                                <textarea id="personalStatement" rows="4" maxlength="500" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Tell us why you want to join this program..."></textarea>
+                            </div>
+
+                            <div id="form-message" class="text-center text-sm hidden"></div>
+
+                            <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150">
+                                <i class="fas fa-paper-plane mr-2"></i> Submit Application
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createAttendanceDonutChart(percentage) {
+            const ctx = $('#attendance-donut-chart');
+            if (!ctx) return;
+            
+            if (window.attendanceChart) {
+                window.attendanceChart.destroy();
+            }
+
+            const missedPercentage = 100 - percentage;
+            
+            window.attendanceChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [percentage, missedPercentage],
+                        backgroundColor: [
+                            '#10b981', 
+                            '#e5e7eb'  
+                        ],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '80%', 
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false },
+                    }
+                }
+            });
+        }
+
+
+        // --- Final Render Function ---
+
+        function renderApp() {
+            if (!state.isAuthenticated) {
+                document.body.classList.remove('bg-gray-100');
+                renderLogin();
+                return;
+            }
+
+            document.body.classList.add('bg-gray-100');
+            let mainContentHTML = '';
+            
+            if (state.user.role === 'student') {
+                switch (state.view) {
+                    case 'student-home':
+                        mainContentHTML = renderStudentHome();
+                        break;
+                    case 'student-dashboard':
+                        mainContentHTML = renderStudentDashboard();
+                        break;
+                    case 'student-scorecard':
+                        mainContentHTML = renderStudentScorecard();
+                        break;
+                    case 'student-exams':
+                        mainContentHTML = renderStudentExams();
+                        break;
+                    case 'student-profile':
+                        mainContentHTML = renderStudentProfile();
+                        break;
+                    case 'student-attendance-detail':
+                        mainContentHTML = renderStudentAttendanceDetail();
+                        break;
+                    case 'student-finance':
+                        mainContentHTML = renderStudentFinance();
+                        break;
+                    case 'student-form':
+                        mainContentHTML = renderApplicationForm();
+                        break;
+                    default:
+                        mainContentHTML = renderStudentHome();
+                        break;
+                }
+            } else if (state.user.role === 'admin') {
+                if (state.view === 'admin-applications') {
+                    mainContentHTML = renderAdminApplications();
+                } else if (state.view === 'admin-marks') {
+                    mainContentHTML = renderAdminMarksManagement();
+                } else if (state.view === 'admin-attendance') { // NEW ADMIN VIEW
+                    mainContentHTML = renderAdminAttendanceManagement();
+                } else if (state.view === 'admin-exam-links') { // NEW ADMIN EXAM VIEW
+                    mainContentHTML = renderAdminExamManagement();
+                } else {
+                    mainContentHTML = renderAdminDashboard();
+                }
+            }
+
+            container.innerHTML = `
+                ${renderSidebar(state.view)}
+                <div class="flex-1 flex flex-col overflow-hidden">
+                    ${renderHeader()}
+                    <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100">
+                        ${mainContentHTML}
+                    </main>
+                </div>
+                <div id="sidebar-backdrop" class="fixed inset-0 bg-black opacity-25 z-40 hidden md:hidden"></div>
+            `;
+
+            if (state.view !== 'login') {
+                $('#logout-btn').addEventListener('click', handleLogout);
+
+                $$('.nav-link').forEach(link => {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        changeView(e.currentTarget.dataset.view);
+                        if(window.innerWidth < 768) {
+                            $('#sidebar').classList.remove('active');
+                            $('#sidebar-backdrop').classList.add('hidden');
+                        }
+                    });
+                });
+
+                if (state.user.role === 'admin') {
+                    const tableContainer = $('#admin-app-table');
+                    if (tableContainer) {
+                        tableContainer.addEventListener('click', handleAdminAction);
+                    }
+                    if ($('#notice-form')) {
+                        $('#notice-form').addEventListener('submit', handlePostNotice);
+                    }
+                    if ($('#marks-form')) {
+                        $('#marks-form').addEventListener('submit', handleMarksUpdate);
+                    }
+                    if ($('#marksStudentId')) {
+                        // Re-render app on change/load button click to refresh marks management UI
+                        $('#marksStudentId').addEventListener('change', () => renderApp());
+                        $('#load-marks-btn').addEventListener('click', () => { 
+                            // Only rerender the app, the value from the select element will be read inside renderAdminMarksManagement
+                            renderApp();
+                        });
+                    }
+                    
+                    // FIX: Ensure Load Attendance button correctly triggers re-render to load selected student's data into form fields
+                    if ($('#attendanceStudentId')) { 
+                        $('#attendanceStudentId').addEventListener('change', () => renderApp());
+                        $('#load-attendance-btn').addEventListener('click', () => {
+                            renderApp();
+                        });
+                    }
+                    if ($('#attendance-update-form')) { 
+                        // FIX: Ensure the form submit is handled properly
+                        $('#attendance-update-form').addEventListener('submit', handleUpdateAttendance);
+                    }
+                    
+                    // NEW: Exam link management listeners
+                    if ($('#exam-link-form')) {
+                        $('#exam-link-form').addEventListener('submit', handleExamQuestionLinkUpdate);
+                    }
+                    if ($('#examSubject')) {
+                        // Re-render the app when the subject changes to refresh the "Current Exam Links" list visually
+                        $('#examSubject').addEventListener('change', () => renderApp());
+                    }
+                }
+
+                if (state.user.role === 'student') {
+                    if (state.view === 'student-form') {
+                        $('#application-form').addEventListener('submit', handleApplicationSubmit);
+                    }
+                    if (state.view === 'student-finance') {
+                        const paymentForm = $('#payment-form');
+                        if (paymentForm) paymentForm.addEventListener('submit', handlePaymentSubmit);
+                    }
+                    if (state.view === 'student-profile') {
+                        const updatePhotoBtn = $('#update-photo-btn');
+                        if (updatePhotoBtn) updatePhotoBtn.addEventListener('click', handleProfilePhotoUpdate);
+                    }
+                    
+                    if (state.view === 'student-dashboard' || state.view === 'student-home') {
+                        const attendance = getStudentAttendance(state.user.email);
+                        const overallPercentage = attendance.totalClasses > 0 ? Math.round((attendance.attendedClasses / attendance.totalClasses) * 100) : 0;
+                        setTimeout(() => createAttendanceDonutChart(overallPercentage), 50);
+                    }
+                }
+
+                // Mobile Sidebar Toggles
+                const sidebar = $('#sidebar');
+                const backdrop = $('#sidebar-backdrop');
+                if ($('#sidebar-toggle')) {
+                    $('#sidebar-toggle').addEventListener('click', () => {
+                        sidebar.classList.toggle('active');
+                        backdrop.classList.toggle('hidden');
+                    });
+                }
+                if (backdrop) {
+                    backdrop.addEventListener('click', () => {
+                        sidebar.classList.remove('active');
+                        backdrop.classList.add('hidden');
+                    });
+                }
+            }
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            renderApp();
+        });
+    </script>
+</body>
+</html>
